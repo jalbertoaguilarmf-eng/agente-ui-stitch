@@ -11,6 +11,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY,
 });
 
+const modelo = process.env.OPENROUTER_MODEL || "openrouter/free";
 let stitchClient;
 
 async function iniciarAgente() {
@@ -62,11 +63,12 @@ Reglas:
   // 3. El Bucle del Agente (Agentic Loop)
   while (!tareaCompletada) {
     const respuesta = await openai.chat.completions.create({
-      model: "anthropic/claude-3.5-sonnet", // Se usa Claude a través de OpenRouter
+      model: modelo,
       messages: mensajes,
       tools: openRouterTools,
     });
 
+    console.log(`Modelo utilizado: ${respuesta.model}`);
     const mensajeModelo = respuesta.choices[0].message;
     mensajes.push(mensajeModelo);
 
@@ -93,16 +95,26 @@ Reglas:
 
           console.log(`Acción completada con éxito.`);
         } catch (error) {
-          console.log(`Error en la herramienta: ${error.message}. Informando al agente para que corrija...`);
+          const mensajeError = error instanceof Error ? error.message : String(error);
+          const errorAutenticacion =
+            /api key not valid|valid api key/i.test(mensajeError) ||
+            (typeof error === "object" && error !== null && "code" in error && error.code === 401);
+
+          if (errorAutenticacion) {
+            throw new Error(
+              "Stitch rechazó la API key (401). Verifica que STITCH_API_KEY sea una clave válida de Google Stitch; OPENROUTER_API_KEY es distinta.",
+              { cause: error }
+            );
+          }
+
+          console.log(`Error en la herramienta: ${mensajeError}. Informando al agente para que corrija...`);
           mensajes.push({
             role: "tool",
             tool_call_id: toolCall.id,
             name: toolCall.function.name,
-            content: `Error: ${error.message}`
+            content: `Error: ${mensajeError}`
           });
         }
-
-        await stitchClient.close();
       }
     } else {
       // Si ya no usa herramientas, significa que terminó el trabajo y nos responde con texto
